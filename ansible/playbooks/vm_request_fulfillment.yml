@@ -223,6 +223,8 @@
             ansible_httpapi_port: "{{ (zabbix_url is match('^https')) | ternary(443, 80) }}"
             ansible_httpapi_use_ssl: "{{ zabbix_url is match('^https') }}"
             ansible_httpapi_validate_certs: false
+            # nginx serves Zabbix at the web root, not the /zabbix default
+            ansible_zabbix_url_path: ""
             ansible_user: Admin
             ansible_httpapi_pass: "{{ zabbix_admin_password }}"
 
