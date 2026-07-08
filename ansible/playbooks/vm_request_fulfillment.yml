@@ -56,6 +56,7 @@
 
         - name: Provision EC2 instance (idempotent per JIRA issue)
           amazon.aws.ec2_instance:
+            region: "{{ vm_region }}"
             name: "{{ vm_name }}"
             exact_count: 1
             filters:

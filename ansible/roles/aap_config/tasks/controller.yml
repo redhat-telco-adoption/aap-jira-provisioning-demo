@@ -181,6 +181,7 @@
     ask_variables_on_launch: true
     allow_simultaneous: false
     extra_vars:
+      vm_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-2', true) }}"
       vm_subnet_id: "{{ tf_public_subnet_id }}"
       vm_sg_id: "{{ tf_demo_vm_sg_id }}"
       vm_ami: "{{ vm_ami }}"
