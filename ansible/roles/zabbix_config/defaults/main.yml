@@ -1,0 +1,14 @@
+---
+zabbix_url: "http://{{ zabbix_public_ip }}"
+zabbix_user: Admin
+
+# Host groups created via API. "VM Requests" is where the per-ticket demo VMs
+# are registered by vm_request_fulfillment.yml.
+zabbix_host_groups:
+  - "VM Requests"
+
+# Registration of the Zabbix server itself (self-monitoring).
+# "Zabbix server" is the host that ships with a default Zabbix install.
+zabbix_server_host_name: "Zabbix server"
+zabbix_server_host_group: "Zabbix servers"
+zabbix_linux_template: "Linux by Zabbix agent"

@@ -1,0 +1,46 @@
+---
+- name: Install Zabbix 7.0 LTS repository
+  ansible.builtin.dnf:
+    name: "https://repo.zabbix.com/zabbix/7.0/rhel/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm"
+    state: present
+    disable_gpg_check: true
+
+- name: Clean dnf cache after repo addition
+  ansible.builtin.command: dnf clean all
+  changed_when: true
+
+- name: Install zabbix-agent2
+  ansible.builtin.dnf:
+    name:
+      - zabbix-agent2
+      - firewalld
+      - python3-firewall
+    state: present
+
+- name: Configure zabbix-agent2
+  ansible.builtin.template:
+    src: zabbix_agent2.conf.j2
+    dest: /etc/zabbix/zabbix_agent2.conf
+    owner: root
+    group: zabbix
+    mode: "0640"
+  notify: restart zabbix-agent2
+
+- name: Enable and start firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Enable and start zabbix-agent2
+  ansible.builtin.service:
+    name: zabbix-agent2
+    state: started
+    enabled: true
+
+- name: Open firewall port for zabbix-agent2
+  ansible.posix.firewalld:
+    port: "{{ zabbix_agent_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: true

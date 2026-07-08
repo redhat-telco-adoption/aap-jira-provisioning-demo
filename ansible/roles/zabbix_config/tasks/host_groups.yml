@@ -1,0 +1,29 @@
+---
+- name: Check which host groups exist
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "hostgroup.get"
+      params:
+        filter:
+          name: "{{ zabbix_host_groups }}"
+      auth: "{{ zbx_token }}"
+      id: 1
+  register: hostgroup_get
+
+- name: Create missing host groups
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "hostgroup.create"
+      params:
+        name: "{{ item }}"
+      auth: "{{ zbx_token }}"
+      id: 1
+  loop: "{{ zabbix_host_groups | difference(hostgroup_get.json.result | map(attribute='name') | list) }}"

@@ -1,0 +1,10 @@
+---
+# Collections required by playbooks when run inside AAP's execution environment
+# (auto-installed by the Controller on project sync).
+# ansible.controller and ansible.eda come pre-installed in the default EE.
+collections:
+  - name: amazon.aws
+    version: ">=6.0.0"
+  - name: community.zabbix
+  - name: ansible.eda
+  - name: ansible.posix

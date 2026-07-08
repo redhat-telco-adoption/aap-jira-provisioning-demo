@@ -1,0 +1,52 @@
+############ ZABBIX SERVER CONFIGURATION FILE ###########
+
+### Option: LogFile
+LogFile=/var/log/zabbix/zabbix_server.log
+
+### Option: LogFileSize
+LogFileSize=0
+
+### Option: PidFile
+PidFile=/run/zabbix/zabbix_server.pid
+
+### Option: SocketDir
+SocketDir=/run/zabbix
+
+### Option: DBHost — External RDS
+DBHost={{ rds_address }}
+
+### Option: DBName
+DBName={{ zabbix_db_name }}
+
+### Option: DBUser
+DBUser={{ zabbix_db_user }}
+
+### Option: DBPassword
+DBPassword={{ zabbix_db_password }}
+
+### Option: DBPort
+DBPort=5432
+
+### Option: Vault
+# Not used
+
+### Option: StartPollers
+StartPollers=5
+
+### Option: StartPingers
+StartPingers=1
+
+### Option: CacheSize
+CacheSize=64M
+
+### Option: AlertScriptsPath
+AlertScriptsPath=/usr/lib/zabbix/alertscripts
+
+### Option: ExternalScripts
+ExternalScripts=/usr/lib/zabbix/externalscripts
+
+### Option: LogSlowQueries
+LogSlowQueries=3000
+
+### Option: StatsAllowedIP
+StatsAllowedIP=127.0.0.1

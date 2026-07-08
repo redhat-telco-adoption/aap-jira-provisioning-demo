@@ -1,0 +1,5 @@
+---
+# Per-ticket demo VMs (provisioned by vm_request_fulfillment.yml).
+# zabbix_private_ip (agent target) comes from group_vars/all.yml.
+zabbix_agent_version: "7.0"
+zabbix_agent_port: 10050

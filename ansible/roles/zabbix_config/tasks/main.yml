@@ -1,0 +1,103 @@
+---
+- name: Authenticate to Zabbix API (configured password)
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "user.login"
+      params:
+        username: "{{ zabbix_user }}"
+        password: "{{ zabbix_admin_password }}"
+      id: 1
+  register: zabbix_auth_main
+  failed_when: false
+
+- name: Authenticate to Zabbix API (default password fallback)
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "user.login"
+      params:
+        username: "{{ zabbix_user }}"
+        password: "zabbix"
+      id: 1
+  register: zabbix_auth_default
+  when: zabbix_auth_main.json.result is not defined
+  failed_when: false
+
+- name: Set initial auth token
+  ansible.builtin.set_fact:
+    zbx_token: >-
+      {{ zabbix_auth_main.json.result
+         | default(zabbix_auth_default.json.result | default('')) }}
+
+- name: Fail if authentication failed with both passwords
+  ansible.builtin.fail:
+    msg: "Cannot authenticate to Zabbix API at {{ zabbix_url }} — check credentials"
+  when: zbx_token == ''
+
+- name: Clear Admin user name/surname to satisfy password complexity
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "user.update"
+      params:
+        userid: "1"
+        name: ""
+        surname: ""
+      auth: "{{ zbx_token }}"
+      id: 1
+  when: zabbix_auth_main.json.result is not defined
+
+- name: Change admin password from Zabbix default
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "user.update"
+      params:
+        userid: "1"
+        passwd: "{{ zabbix_admin_password }}"
+        current_passwd: "zabbix"
+      auth: "{{ zbx_token }}"
+      id: 1
+  when: zabbix_auth_main.json.result is not defined
+
+- name: Re-authenticate with configured password
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "user.login"
+      params:
+        username: "{{ zabbix_user }}"
+        password: "{{ zabbix_admin_password }}"
+      id: 1
+  register: zabbix_auth_final
+  when: zabbix_auth_main.json.result is not defined
+
+- name: Update auth token after password change
+  ansible.builtin.set_fact:
+    zbx_token: "{{ zabbix_auth_final.json.result }}"
+  when: zabbix_auth_main.json.result is not defined
+
+- name: Configure Zabbix host groups
+  ansible.builtin.include_tasks: host_groups.yml
+
+- name: Configure Zabbix hosts
+  ansible.builtin.include_tasks: hosts.yml
+
+- name: Configure templates and triggers
+  ansible.builtin.include_tasks: templates_and_triggers.yml

@@ -1,0 +1,12 @@
+---
+- name: Install and configure Zabbix server
+  hosts: tag_Role_zabbix_server
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: zabbix_server
+    # Self-monitoring: agent on the server itself, pointed at localhost
+    - role: zabbix_agent
+      vars:
+        zabbix_private_ip: 127.0.0.1

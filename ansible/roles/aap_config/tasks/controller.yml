@@ -1,0 +1,189 @@
+---
+# --- Credentials ---
+
+- name: Create AWS credential
+  ansible.controller.credential:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ aws_credential_name }}"
+    organization: "{{ aap_organization }}"
+    credential_type: Amazon Web Services
+    inputs:
+      username: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+      password: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    state: present
+
+- name: Create machine credential for demo VMs
+  ansible.controller.credential:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ machine_credential_name }}"
+    organization: "{{ aap_organization }}"
+    credential_type: Machine
+    inputs:
+      username: ec2-user
+      # Key material appears after `make infra`; re-run config-aap to inject it
+      ssh_key_data: "{{ ssh_key_data | default(omit, true) }}"
+    state: present
+
+- name: Create JIRA API credential type
+  ansible.controller.credential_type:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ jira_credential_type_name }}"
+    kind: cloud
+    inputs:
+      fields:
+        - id: jira_url
+          type: string
+          label: JIRA URL
+        - id: jira_email
+          type: string
+          label: JIRA Email
+        - id: jira_api_token
+          type: string
+          label: JIRA API Token
+          secret: true
+      required:
+        - jira_url
+        - jira_email
+        - jira_api_token
+    injectors:
+      env:
+        JIRA_URL: !unsafe "{{ jira_url }}"
+        JIRA_EMAIL: !unsafe "{{ jira_email }}"
+        JIRA_API_TOKEN: !unsafe "{{ jira_api_token }}"
+    state: present
+
+- name: Create JIRA API credential
+  ansible.controller.credential:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ jira_credential_name }}"
+    organization: "{{ aap_organization }}"
+    credential_type: "{{ jira_credential_type_name }}"
+    inputs:
+      jira_url: "{{ lookup('env', 'JIRA_URL') }}"
+      jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
+      jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') }}"
+    state: present
+
+- name: Create Zabbix API credential type
+  ansible.controller.credential_type:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ zabbix_credential_type_name }}"
+    kind: cloud
+    inputs:
+      fields:
+        - id: zabbix_url
+          type: string
+          label: Zabbix URL
+        - id: zabbix_admin_password
+          type: string
+          label: Zabbix Admin Password
+          secret: true
+      required:
+        - zabbix_url
+        - zabbix_admin_password
+    injectors:
+      env:
+        ZABBIX_URL: !unsafe "{{ zabbix_url }}"
+        ZABBIX_ADMIN_PASSWORD: !unsafe "{{ zabbix_admin_password }}"
+    state: present
+
+- name: Create Zabbix API credential
+  ansible.controller.credential:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ zabbix_credential_name }}"
+    organization: "{{ aap_organization }}"
+    credential_type: "{{ zabbix_credential_type_name }}"
+    inputs:
+      zabbix_url: "http://{{ tf_zabbix_public_ip }}"
+      zabbix_admin_password: "{{ lookup('env', 'ZABBIX_ADMIN_PASSWORD') }}"
+    state: present
+
+# --- Project ---
+
+- name: Create demo project
+  ansible.controller.project:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ controller_project_name }}"
+    organization: "{{ aap_organization }}"
+    scm_type: git
+    scm_url: "{{ demo_repo_url }}"
+    scm_branch: main
+    scm_update_on_launch: false
+    wait: true
+    state: present
+
+# --- Inventory ---
+
+- name: Create demo inventory
+  ansible.controller.inventory:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ controller_inventory_name }}"
+    organization: "{{ aap_organization }}"
+    state: present
+
+- name: Add localhost to demo inventory
+  ansible.controller.host:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: localhost
+    inventory: "{{ controller_inventory_name }}"
+    variables:
+      ansible_connection: local
+      ansible_python_interpreter: !unsafe "{{ ansible_playbook_python }}"
+    state: present
+
+# --- Job template ---
+
+- name: Create job template - VM Request Fulfillment
+  ansible.controller.job_template:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ controller_jt_name }}"
+    organization: "{{ aap_organization }}"
+    project: "{{ controller_project_name }}"
+    playbook: ansible/playbooks/vm_request_fulfillment.yml
+    inventory: "{{ controller_inventory_name }}"
+    credentials:
+      - "{{ aws_credential_name }}"
+      - "{{ machine_credential_name }}"
+      - "{{ jira_credential_name }}"
+      - "{{ zabbix_credential_name }}"
+    # Must be true so the extra_vars sent by the EDA rulebook
+    # (jira_issue_key, vm_name, ...) are accepted at launch time.
+    ask_variables_on_launch: true
+    allow_simultaneous: false
+    extra_vars:
+      vm_subnet_id: "{{ tf_public_subnet_id }}"
+      vm_sg_id: "{{ tf_demo_vm_sg_id }}"
+      vm_ami: "{{ vm_ami }}"
+      vm_key_name: "{{ tf_key_pair_name }}"
+      zabbix_server_private_ip: "{{ tf_zabbix_private_ip }}"
+    state: present

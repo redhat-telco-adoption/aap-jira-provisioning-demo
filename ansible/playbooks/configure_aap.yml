@@ -1,0 +1,27 @@
+---
+# Configure AAP (Controller + EDA) via the Gateway API for the JIRA VM Request
+# demo. Runnable before infra exists (PENDING_INFRA placeholders) and
+# re-runnable after `make infra` to fill in real values.
+#
+# Run from ansible/:  ansible-playbook playbooks/configure_aap.yml
+
+- name: Configure AAP Controller and EDA via API
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  roles:
+    - role: aap_config
+
+  post_tasks:
+    - name: Print EDA event stream webhook URL
+      ansible.builtin.debug:
+        msg:
+          - "AAP configuration complete."
+          - ""
+          - "EDA event stream webhook URL (point the JIRA Automation rule here):"
+          - "  {{ eda_webhook_url | default('NOT AVAILABLE — check the event stream in the AAP UI') }}"
+          - ""
+          - "The rule must send basic auth: EDA_STREAM_USERNAME / EDA_STREAM_PASSWORD"
+          - "and a flat JSON payload with: issue_type, issue_key, summary,"
+          - "instance_size, environment, reporter."

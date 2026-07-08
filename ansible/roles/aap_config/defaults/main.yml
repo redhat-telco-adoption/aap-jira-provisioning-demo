@@ -1,0 +1,63 @@
+---
+# AAP 2.5 uses the Gateway as the single API entry point for Controller and EDA
+aap_gateway_url: "{{ lookup('env', 'AAP_GATEWAY_URL') }}"
+aap_admin_username: "{{ lookup('env', 'AAP_ADMIN_USERNAME') | default('admin', true) }}"
+aap_admin_password: "{{ lookup('env', 'AAP_ADMIN_PASSWORD') }}"
+aap_validate_certs: true
+aap_organization: Default
+
+# Demo repo — synced by the Controller project and the EDA project (public, no credential)
+demo_repo_url: "{{ lookup('env', 'DEMO_REPO_URL') }}"
+
+# EDA event stream basic auth — the JIRA Automation rule sends these in its
+# Authorization header
+eda_stream_username: "{{ lookup('env', 'EDA_STREAM_USERNAME') | default('jira', true) }}"
+eda_stream_password: "{{ lookup('env', 'EDA_STREAM_PASSWORD') }}"
+
+# --- Terraform outputs ---
+# Read locally at run time; PENDING_INFRA fallbacks keep this playbook
+# runnable before `make infra` exists and idempotently re-runnable after.
+tf_dir: "{{ playbook_dir }}/../../terraform"
+tf_zabbix_public_ip: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw zabbix_public_ip 2>/dev/null',
+            errors='ignore') | default('PENDING_INFRA', true) }}
+tf_zabbix_private_ip: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw zabbix_private_ip 2>/dev/null',
+            errors='ignore') | default('PENDING_INFRA', true) }}
+tf_public_subnet_id: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw public_subnet_id 2>/dev/null',
+            errors='ignore') | default('PENDING_INFRA', true) }}
+tf_demo_vm_sg_id: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw demo_vm_sg_id 2>/dev/null',
+            errors='ignore') | default('PENDING_INFRA', true) }}
+tf_key_pair_name: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw key_pair_name 2>/dev/null',
+            errors='ignore') | default('PENDING_INFRA', true) }}
+
+# SSH key for the machine credential: terraform output, else AWS_PRIVATE_KEY_PATH,
+# else empty (credential is created without key material until infra exists)
+ssh_key_path: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw ssh_key_path 2>/dev/null',
+            errors='ignore') | default(lookup('env', 'AWS_PRIVATE_KEY_PATH'), true) }}
+ssh_key_data: "{{ lookup('file', ssh_key_path, errors='ignore') | default('', true) }}"
+
+# AMI for ticket-provisioned VMs
+vm_ami: "{{ lookup('env', 'VM_AMI') | default('PENDING_INFRA', true) }}"
+
+# --- Resource names ---
+controller_project_name: "AAP JIRA Demo"
+controller_inventory_name: "Demo Inventory"
+controller_jt_name: "VM Request Fulfillment"
+aws_credential_name: "Demo AWS"
+machine_credential_name: "Demo VM SSH Key"
+jira_credential_type_name: "JIRA API"
+jira_credential_name: "JIRA API Credentials"
+zabbix_credential_type_name: "Zabbix API"
+zabbix_credential_name: "Zabbix API Credentials"
+eda_controller_credential_name: "AAP Controller Credential"
+eda_stream_credential_name: "JIRA Stream Auth"
+eda_event_stream_name: "JIRA Webhook Stream"
+eda_project_name: "AAP JIRA Demo Rulebooks"
+eda_activation_name: "JIRA Event Handler"
+eda_rulebook_name: "jira_eda.yml"
+eda_source_name: "JIRA Webhook"

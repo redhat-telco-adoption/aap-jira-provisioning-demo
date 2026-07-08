@@ -1,0 +1,287 @@
+---
+# VM Request Fulfillment — launched by the "JIRA Event Handler" EDA activation.
+#
+# Extra vars from EDA (flat payload sent by the JIRA Automation rule):
+#   jira_issue_key, vm_name, instance_size, environment, reporter
+# Extra vars baked into the job template (from terraform outputs):
+#   vm_subnet_id, vm_sg_id, vm_ami, vm_key_name, zabbix_server_private_ip
+# Environment (injected by AAP credentials):
+#   JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN   (JIRA API credential)
+#   ZABBIX_URL, ZABBIX_ADMIN_PASSWORD      (Zabbix API credential)
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (AWS credential)
+#
+# Note: block/rescue cannot span plays. Play 1 (provision) has its own rescue;
+# play 2 (agent install on the new VM) records success in a fact, and play 3
+# reports success or failure back to JIRA based on that fact.
+
+# ============================================================
+# Play 1 — provision the EC2 instance (localhost)
+# ============================================================
+- name: Provision VM requested via JIRA
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    jira_url: "{{ lookup('env', 'JIRA_URL') }}"
+    jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
+    jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') }}"
+    vm_instance_type: >-
+      {{ instance_size | default(lookup('env', 'VM_DEFAULT_INSTANCE_TYPE') | default('t3.micro', true), true) }}
+    # 'environment' is a reserved word in Ansible — alias it once and use the alias
+    vm_environment: "{{ environment | default('dev', true) }}"
+    vm_requested_by: "{{ reporter | default('unknown', true) }}"
+
+  tasks:
+    - name: Provision block
+      block:
+        - name: Comment on JIRA ticket - provisioning started
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/api/3/issue/{{ jira_issue_key }}/comment"
+            method: POST
+            user: "{{ jira_email }}"
+            password: "{{ jira_api_token }}"
+            force_basic_auth: true
+            body_format: json
+            status_code: 201
+            body:
+              body:
+                type: doc
+                version: 1
+                content:
+                  - type: paragraph
+                    content:
+                      - type: text
+                        text: "Provisioning started: VM '{{ vm_name }}' ({{ vm_instance_type }}, {{ vm_environment }}) via AAP."
+
+        - name: Provision EC2 instance (idempotent per JIRA issue)
+          amazon.aws.ec2_instance:
+            name: "{{ vm_name }}"
+            exact_count: 1
+            filters:
+              "tag:JiraIssue": "{{ jira_issue_key }}"
+              instance-state-name:
+                - running
+                - pending
+            instance_type: "{{ vm_instance_type }}"
+            image_id: "{{ vm_ami }}"
+            key_name: "{{ vm_key_name }}"
+            subnet_id: "{{ vm_subnet_id }}"
+            security_groups:
+              - "{{ vm_sg_id }}"
+            network:
+              assign_public_ip: true
+            tags:
+              JiraIssue: "{{ jira_issue_key }}"
+              Environment: "{{ vm_environment }}"
+              RequestedBy: "{{ vm_requested_by }}"
+              Role: demo_vm
+              Demo: aap-jira-demo
+            wait: true
+          register: ec2_result
+
+        - name: Record instance facts
+          ansible.builtin.set_fact:
+            vm_instance_id: "{{ ec2_result.instances[0].instance_id }}"
+            vm_public_ip: "{{ ec2_result.instances[0].public_ip_address }}"
+            vm_private_ip: "{{ ec2_result.instances[0].private_ip_address }}"
+
+        - name: Wait for SSH on the new VM
+          ansible.builtin.wait_for:
+            host: "{{ vm_public_ip }}"
+            port: 22
+            delay: 10
+            timeout: 300
+
+        - name: Add the new VM to the in-memory inventory
+          ansible.builtin.add_host:
+            name: "{{ vm_name }}"
+            groups: provisioned_vm
+            ansible_host: "{{ vm_public_ip }}"
+            ansible_user: ec2-user
+            ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          changed_when: false
+
+      rescue:
+        - name: Comment on JIRA ticket - provisioning failed
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/api/3/issue/{{ jira_issue_key }}/comment"
+            method: POST
+            user: "{{ jira_email }}"
+            password: "{{ jira_api_token }}"
+            force_basic_auth: true
+            body_format: json
+            status_code: 201
+            body:
+              body:
+                type: doc
+                version: 1
+                content:
+                  - type: paragraph
+                    content:
+                      - type: text
+                        text: "Provisioning FAILED: {{ ansible_failed_task.name | default('unknown task') }}. Check the AAP job output."
+          failed_when: false
+
+        - name: Fail the job after reporting to JIRA
+          ansible.builtin.fail:
+            msg: "Provisioning failed at: {{ ansible_failed_task.name | default('unknown task') }}"
+
+# ============================================================
+# Play 2 — install + configure the Zabbix agent on the new VM
+# ============================================================
+- name: Install Zabbix agent on the provisioned VM
+  hosts: provisioned_vm
+  become: true
+  gather_facts: true
+
+  vars:
+    # zabbix_agent role points the agent at this address
+    zabbix_private_ip: "{{ zabbix_server_private_ip }}"
+
+  roles:
+    - role: zabbix_agent
+
+  post_tasks:
+    - name: Mark agent installation as successful
+      ansible.builtin.set_fact:
+        agent_installed: true
+
+# ============================================================
+# Play 3 — register in Zabbix and close the loop in JIRA
+# ============================================================
+- name: Register VM in Zabbix and update JIRA ticket
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    jira_url: "{{ lookup('env', 'JIRA_URL') }}"
+    jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
+    jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') }}"
+    zabbix_url: "{{ lookup('env', 'ZABBIX_URL') }}"
+    zabbix_admin_password: "{{ lookup('env', 'ZABBIX_ADMIN_PASSWORD') }}"
+    agent_ok: "{{ hostvars[vm_name].agent_installed | default(false) }}"
+
+  tasks:
+    # --- Success path ---
+    - name: Register host in Zabbix and report success
+      when: agent_ok | bool
+      block:
+        - name: Register host in Zabbix
+          community.zabbix.zabbix_host:
+            host_name: "{{ vm_name }}"
+            visible_name: "{{ vm_name }}"
+            host_groups:
+              - "VM Requests"
+            link_templates:
+              - "Linux by Zabbix agent"
+            status: enabled
+            state: present
+            interfaces:
+              - type: agent
+                main: 1
+                useip: 1
+                ip: "{{ vm_private_ip }}"
+                dns: ""
+                port: "10050"
+          vars:
+            # community.zabbix >= 2.0 talks to the API via the httpapi plugin;
+            # ZABBIX_URL (from the Zabbix API credential) provides the endpoint.
+            ansible_connection: httpapi
+            ansible_network_os: community.zabbix.zabbix
+            ansible_host: "{{ zabbix_url | regex_replace('^https?://', '') }}"
+            ansible_httpapi_port: "{{ (zabbix_url is match('^https')) | ternary(443, 80) }}"
+            ansible_httpapi_use_ssl: "{{ zabbix_url is match('^https') }}"
+            ansible_httpapi_validate_certs: false
+            ansible_user: Admin
+            ansible_httpapi_pass: "{{ zabbix_admin_password }}"
+
+        - name: Comment on JIRA ticket - provisioning succeeded
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/api/3/issue/{{ jira_issue_key }}/comment"
+            method: POST
+            user: "{{ jira_email }}"
+            password: "{{ jira_api_token }}"
+            force_basic_auth: true
+            body_format: json
+            status_code: 201
+            body:
+              body:
+                type: doc
+                version: 1
+                content:
+                  - type: paragraph
+                    content:
+                      - type: text
+                        text: >-
+                          VM provisioned: {{ vm_instance_id }}
+                          (public {{ vm_public_ip }}, private {{ vm_private_ip }}).
+                          Zabbix agent installed and host registered in group
+                          'VM Requests' with template 'Linux by Zabbix agent'.
+
+        # GOTCHA: no body_format on GET — uri would add a JSON content-type to a
+        # body-less request and Atlassian's CDN rejects that with a 403.
+        - name: Get available transitions for the issue
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/api/3/issue/{{ jira_issue_key }}/transitions"
+            method: GET
+            user: "{{ jira_email }}"
+            password: "{{ jira_api_token }}"
+            force_basic_auth: true
+            return_content: true
+            headers:
+              Accept: "application/json"
+          register: issue_transitions
+
+        - name: Find the transition to Done
+          ansible.builtin.set_fact:
+            done_transitions: >-
+              {{ issue_transitions.json['transitions']
+                 | selectattr('to.name', 'equalto', 'Done') | list }}
+
+        - name: Transition the issue to Done
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/api/3/issue/{{ jira_issue_key }}/transitions"
+            method: POST
+            user: "{{ jira_email }}"
+            password: "{{ jira_api_token }}"
+            force_basic_auth: true
+            body_format: json
+            status_code: 204
+            body:
+              transition:
+                id: "{{ done_transitions[0].id }}"
+          when: done_transitions | length > 0
+
+    # --- Failure path (agent install failed on the VM) ---
+    - name: Report agent installation failure
+      when: not (agent_ok | bool)
+      block:
+        - name: Comment on JIRA ticket - agent installation failed
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/api/3/issue/{{ jira_issue_key }}/comment"
+            method: POST
+            user: "{{ jira_email }}"
+            password: "{{ jira_api_token }}"
+            force_basic_auth: true
+            body_format: json
+            status_code: 201
+            body:
+              body:
+                type: doc
+                version: 1
+                content:
+                  - type: paragraph
+                    content:
+                      - type: text
+                        text: >-
+                          Provisioning FAILED: Zabbix agent installation did not
+                          complete on '{{ vm_name }}'
+                          ({{ vm_public_ip | default('no ip') }}).
+                          The instance was left running for troubleshooting.
+          failed_when: false
+
+        - name: Fail the job after reporting to JIRA
+          ansible.builtin.fail:
+            msg: "Zabbix agent installation failed on {{ vm_name }}"

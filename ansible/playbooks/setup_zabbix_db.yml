@@ -1,0 +1,43 @@
+---
+- name: Setup Zabbix database on RDS
+  hosts: tag_Role_zabbix_server
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Install python3-psycopg2
+      ansible.builtin.dnf:
+        name: python3-psycopg2
+        state: present
+
+    - name: Create zabbix database user
+      community.postgresql.postgresql_user:
+        login_host: "{{ rds_address }}"
+        login_user: "{{ rds_master_username }}"
+        login_password: "{{ rds_master_password }}"
+        name: "{{ zabbix_db_user | default('zabbix') }}"
+        password: "{{ zabbix_db_password }}"
+        state: present
+
+    - name: Create zabbix database
+      community.postgresql.postgresql_db:
+        login_host: "{{ rds_address }}"
+        login_user: "{{ rds_master_username }}"
+        login_password: "{{ rds_master_password }}"
+        name: zabbix
+        owner: "{{ zabbix_db_user | default('zabbix') }}"
+        encoding: UTF8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        state: present
+
+    - name: Grant all privileges on zabbix database to zabbix user
+      community.postgresql.postgresql_privs:
+        login_host: "{{ rds_address }}"
+        login_user: "{{ rds_master_username }}"
+        login_password: "{{ rds_master_password }}"
+        database: zabbix
+        role: "{{ zabbix_db_user | default('zabbix') }}"
+        privs: ALL
+        type: database
+        state: present

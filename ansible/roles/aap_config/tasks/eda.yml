@@ -1,0 +1,248 @@
+---
+- name: Create Controller API token credential for EDA
+  ansible.controller.token:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    description: "EDA Controller Token"
+    application: ""
+    scope: write
+    state: present
+  register: controller_token
+
+- name: Create EDA credential for Controller access
+  ansible.eda.credential:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ eda_controller_credential_name }}"
+    credential_type_name: "Red Hat Ansible Automation Platform"
+    organization_name: "{{ aap_organization }}"
+    inputs:
+      host: "{{ aap_gateway_url }}/api/controller/"
+      oauth_token: "{{ controller_token.ansible_facts.controller_token.token }}"
+    state: present
+
+- name: Create EDA event stream credential
+  ansible.eda.credential:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ eda_stream_credential_name }}"
+    credential_type_name: "Basic Event Stream"
+    organization_name: "{{ aap_organization }}"
+    inputs:
+      username: "{{ eda_stream_username }}"
+      password: "{{ eda_stream_password }}"
+    state: present
+
+- name: Create EDA event stream
+  ansible.eda.event_stream:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ eda_event_stream_name }}"
+    credential: "{{ eda_stream_credential_name }}"
+    organization_name: "{{ aap_organization }}"
+    state: present
+
+- name: Disable test mode on EDA event stream
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/event-streams/?name={{ eda_event_stream_name | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_stream_get
+
+- name: Set event stream test_mode to false
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/event-streams/{{ eda_stream_get.json.results[0].id }}/"
+    method: PATCH
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+    body_format: json
+    body:
+      test_mode: false
+    status_code: 200
+  when: eda_stream_get.json.results[0].test_mode | default(false)
+
+- name: Create EDA project
+  ansible.eda.project:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ eda_project_name }}"
+    url: "{{ demo_repo_url }}"
+    organization_name: "{{ aap_organization }}"
+    state: present
+
+- name: Get EDA project ID for sync
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/projects/?name={{ eda_project_name | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_project_info
+
+- name: Wait for EDA project initial sync to finish before triggering re-sync
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/projects/{{ eda_project_info.json.results[0].id }}/"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_project_pre_sync
+  until: eda_project_pre_sync.json.import_state != 'running'
+  retries: 20
+  delay: 5
+
+- name: Sync EDA project to get latest rulebook content
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/projects/{{ eda_project_info.json.results[0].id }}/sync/"
+    method: POST
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+    status_code: [200, 202]
+
+- name: Wait for EDA project sync to complete
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/projects/{{ eda_project_info.json.results[0].id }}/"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_project_sync_status
+  until: eda_project_sync_status.json.import_state == 'completed'
+  retries: 10
+  delay: 5
+
+- name: Look up EDA rulebook ID and content
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/rulebooks/?name={{ eda_rulebook_name | urlencode }}&project_id={{ eda_project_info.json.results[0].id }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_rulebook_info
+
+- name: Look up EDA event stream ID
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/event-streams/?name={{ eda_event_stream_name | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_event_stream_info
+
+- name: Look up EDA decision environment ID
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/decision-environments/?name=Default+Decision+Environment"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_de_info
+
+- name: Look up EDA credential ID
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/eda-credentials/?name={{ eda_controller_credential_name | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_credential_info
+
+- name: Look up EDA organization ID
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/organizations/?name={{ aap_organization | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_org_info
+
+- name: Check if EDA activation already exists
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/activations/?name={{ eda_activation_name | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: existing_activation
+
+- name: Delete EDA activation if it exists without event stream mapping
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/activations/{{ existing_activation.json.results[0].id }}/"
+    method: DELETE
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+    status_code: 204
+  when:
+    - existing_activation.json.count > 0
+    - existing_activation.json.results[0].event_streams | length == 0
+
+- name: Create EDA rulebook activation with event stream mapping
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/activations/"
+    method: POST
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+    body_format: json
+    status_code: 201
+    body:
+      name: "{{ eda_activation_name }}"
+      rulebook_id: "{{ eda_rulebook_info.json.results[0].id }}"
+      decision_environment_id: "{{ eda_de_info.json.results[0].id }}"
+      organization_id: "{{ eda_org_info.json.results[0].id }}"
+      eda_credentials:
+        - "{{ eda_credential_info.json.results[0].id }}"
+      is_enabled: true
+      restart_policy: "on-failure"
+      log_level: "error"
+      source_mappings: >-
+        [{"source_name": "{{ eda_source_name }}",
+          "event_stream_name": "{{ eda_event_stream_name }}",
+          "event_stream_id": {{ eda_event_stream_info.json.results[0].id }},
+          "rulebook_hash": "{{ eda_rulebook_info.json.results[0].rulesets | hash('sha256') }}"}]
+  when: >
+    existing_activation.json.count == 0 or
+    existing_activation.json.results[0].event_streams | length == 0
+
+- name: Look up EDA event stream webhook URL
+  ansible.builtin.uri:
+    url: "{{ aap_gateway_url }}/api/eda/v1/event-streams/?name={{ eda_event_stream_name | urlencode }}"
+    method: GET
+    user: "{{ aap_admin_username }}"
+    password: "{{ aap_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ aap_validate_certs }}"
+  register: eda_event_stream_url_info
+
+- name: Set EDA webhook URL fact
+  ansible.builtin.set_fact:
+    eda_webhook_url: "{{ eda_event_stream_url_info.json.results[0].url }}"

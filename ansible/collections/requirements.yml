@@ -1,0 +1,16 @@
+---
+collections:
+  # Red Hat certified — pulled from Automation Hub
+  - name: ansible.controller
+    source: https://console.redhat.com/api/automation-hub/content/published/
+  - name: ansible.eda
+    source: https://console.redhat.com/api/automation-hub/content/published/
+  - name: ansible.posix
+    source: https://console.redhat.com/api/automation-hub/content/published/
+
+  # Community — pulled from Galaxy
+  - name: amazon.aws
+    version: ">=6.0.0"
+  - name: community.zabbix
+  - name: community.postgresql
+  - name: community.general

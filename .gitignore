@@ -1,0 +1,18 @@
+# Secrets — never commit
+.env
+keys/
+*.pem
+kubeconfig*
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Working notes / scratch
+notes.md
+
+# Editor / OS
+.DS_Store

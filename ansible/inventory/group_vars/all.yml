@@ -1,0 +1,24 @@
+---
+# SSH — key generated and stored by Terraform.
+# In AAP context this is ignored; AAP injects the key from the machine credential.
+ansible_ssh_private_key_file: "{{ lookup('pipe', 'cd ../../terraform && terraform output -raw ssh_key_path 2>/dev/null') | default('') }}"
+ansible_user: ec2-user
+
+# Terraform outputs — pulled at runtime for local execution.
+zabbix_public_ip: "{{ lookup('pipe', 'cd ../../terraform && terraform output -raw zabbix_public_ip 2>/dev/null') | default('') }}"
+zabbix_private_ip: "{{ lookup('pipe', 'cd ../../terraform && terraform output -raw zabbix_private_ip 2>/dev/null') | default('') }}"
+rds_address: "{{ lookup('pipe', 'cd ../../terraform && terraform output -raw rds_address 2>/dev/null') | default('') }}"
+
+# Credentials from environment
+rds_master_username: "{{ lookup('env', 'RDS_MASTER_USERNAME') }}"
+rds_master_password: "{{ lookup('env', 'RDS_MASTER_PASSWORD') }}"
+zabbix_admin_password: "{{ lookup('env', 'ZABBIX_ADMIN_PASSWORD') }}"
+zabbix_db_password: "{{ lookup('env', 'ZABBIX_DB_PASSWORD') }}"
+demo_repo_url: "{{ lookup('env', 'DEMO_REPO_URL') }}"
+
+# Existing AAP on OpenShift — sourced from environment.
+# AAP 2.5 uses the Gateway as the single API entry point (Controller and EDA)
+aap_gateway_url: "{{ lookup('env', 'AAP_GATEWAY_URL') }}"
+aap_admin_username: "{{ lookup('env', 'AAP_ADMIN_USERNAME') }}"
+aap_admin_password: "{{ lookup('env', 'AAP_ADMIN_PASSWORD') }}"
+aap_admin_token: "{{ lookup('env', 'AAP_ADMIN_TOKEN') }}"

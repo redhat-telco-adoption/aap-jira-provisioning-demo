@@ -1,0 +1,23 @@
+### Zabbix Agent2 Configuration
+
+PidFile=/run/zabbix/zabbix_agent2.pid
+LogFile=/var/log/zabbix/zabbix_agent2.log
+LogFileSize=0
+
+### Server — passive checks (polling by Zabbix server)
+Server={{ zabbix_private_ip }}
+
+### ServerActive — active checks
+ServerActive={{ zabbix_private_ip }}
+
+### Hostname — must match what's configured in Zabbix
+Hostname={{ inventory_hostname }}
+
+### Listen port
+ListenPort={{ zabbix_agent_listen_port }}
+
+### Timeout
+Timeout=10
+
+### Include custom config snippets
+Include=/etc/zabbix/zabbix_agent2.d/*.conf

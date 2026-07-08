@@ -1,0 +1,62 @@
+---
+# Create one single-select custom field (if missing), ensure its options
+# exist, and record its ID in created_field_ids.
+# Expects: field_spec = {name, description, env_key, options}
+
+- name: "Look up existing custom fields ({{ field_spec.name }})"
+  ansible.builtin.uri:
+    url: "{{ api }}/field"
+  register: all_fields
+
+- name: "Filter for existing select field named {{ field_spec.name }}"
+  ansible.builtin.set_fact:
+    existing_field: >-
+      {{ all_fields.json
+         | selectattr('custom', 'defined') | selectattr('custom')
+         | selectattr('name', 'equalto', field_spec.name)
+         | list | first | default({}) }}
+
+- name: "Create custom field {{ field_spec.name }}"
+  ansible.builtin.uri:
+    url: "{{ api }}/field"
+    method: POST
+    body_format: json
+    status_code: 201
+    body:
+      name: "{{ field_spec.name }}"
+      description: "{{ field_spec.description }}"
+      type: "com.atlassian.jira.plugin.system.customfieldtypes:select"
+      searcherKey: "com.atlassian.jira.plugin.system.customfieldtypes:multiselectsearcher"
+  register: field_create
+  when: existing_field.id is not defined
+
+- name: "Set field ID for {{ field_spec.name }}"
+  ansible.builtin.set_fact:
+    field_id: "{{ existing_field.id | default(field_create.json.id | default('')) }}"
+
+- name: "Get field context ({{ field_spec.name }})"
+  ansible.builtin.uri:
+    url: "{{ api }}/field/{{ field_id }}/context"
+  register: field_context
+
+- name: "Get existing options ({{ field_spec.name }})"
+  ansible.builtin.uri:
+    url: "{{ api }}/field/{{ field_id }}/context/{{ field_context.json['values'][0].id }}/option"
+  register: field_options
+
+- name: "Add missing options ({{ field_spec.name }})"
+  ansible.builtin.uri:
+    url: "{{ api }}/field/{{ field_id }}/context/{{ field_context.json['values'][0].id }}/option"
+    method: POST
+    body_format: json
+    status_code: 200
+    body:
+      options:
+        - value: "{{ item }}"
+  vars:
+    missing: "{{ field_spec.options | difference(field_options.json['values'] | map(attribute='value') | list) }}"
+  loop: "{{ missing }}"
+
+- name: "Record field ID ({{ field_spec.name }})"
+  ansible.builtin.set_fact:
+    created_field_ids: "{{ created_field_ids | default({}) | combine({field_spec.env_key: field_id}) }}"

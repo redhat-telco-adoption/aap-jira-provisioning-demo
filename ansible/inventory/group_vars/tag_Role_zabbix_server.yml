@@ -1,0 +1,5 @@
+---
+# Zabbix server specific variables
+zabbix_version: "7.0"
+zabbix_server_port: 10051
+zabbix_web_port: 80

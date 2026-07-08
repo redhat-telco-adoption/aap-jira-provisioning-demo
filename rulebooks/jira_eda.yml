@@ -1,0 +1,30 @@
+---
+# JIRA → EDA rulebook. The source name "JIRA Webhook" is matched by the
+# activation's source mapping to the "JIRA Webhook Stream" event stream, so
+# events arrive via the AAP event stream endpoint rather than a raw listener.
+#
+# Payload contract (flat JSON sent by the JIRA Automation rule):
+#   issue_type, issue_key, summary, instance_size, environment, reporter
+
+- name: JIRA Event Handler
+  hosts: all
+  sources:
+    - name: JIRA Webhook
+      ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: VM Request ticket created - provision VM
+      condition: event.payload.issue_type == "VM Request"
+      action:
+        run_job_template:
+          name: "VM Request Fulfillment"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              jira_issue_key: "{{ event.payload.issue_key }}"
+              vm_name: "{{ event.payload.summary }}"
+              instance_size: "{{ event.payload.instance_size }}"
+              environment: "{{ event.payload.environment }}"
+              reporter: "{{ event.payload.reporter }}"

@@ -1,0 +1,128 @@
+---
+- name: Install Zabbix 7.0 LTS repository
+  ansible.builtin.dnf:
+    name: "https://repo.zabbix.com/zabbix/7.0/rhel/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm"
+    state: present
+    disable_gpg_check: true
+
+- name: Clean dnf cache after repo addition
+  ansible.builtin.command: dnf clean all
+  changed_when: true
+
+- name: Install Zabbix server packages
+  ansible.builtin.dnf:
+    name:
+      - zabbix-server-pgsql
+      - zabbix-web-pgsql
+      - zabbix-nginx-conf
+      - zabbix-selinux-policy
+      - zabbix-sql-scripts
+      - python3-psycopg2
+      - firewalld
+      - python3-firewall
+      - postgresql
+    state: present
+
+- name: Configure Zabbix server
+  ansible.builtin.template:
+    src: zabbix_server.conf.j2
+    dest: /etc/zabbix/zabbix_server.conf
+    owner: root
+    group: zabbix
+    mode: "0640"
+  notify: restart zabbix-server
+
+- name: Configure nginx for Zabbix
+  ansible.builtin.template:
+    src: nginx_zabbix.conf.j2
+    dest: /etc/nginx/conf.d/zabbix.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart nginx
+
+- name: Configure Zabbix web frontend
+  ansible.builtin.template:
+    src: zabbix.conf.php.j2
+    dest: /etc/zabbix/web/zabbix.conf.php
+    owner: apache
+    group: apache
+    mode: "0640"
+
+- name: Check if Zabbix schema has already been imported
+  ansible.builtin.command:
+    cmd: >
+      psql -h {{ rds_address }} -U {{ rds_master_username }}
+      -d {{ zabbix_db_name }}
+      -c "SELECT COUNT(*) FROM users;"
+  environment:
+    PGPASSWORD: "{{ rds_master_password }}"
+  register: schema_check
+  failed_when: false
+  changed_when: false
+
+- name: Import Zabbix initial schema to RDS
+  ansible.builtin.shell: >
+    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz |
+    psql -h {{ rds_address }} -U {{ rds_master_username }}
+    -d {{ zabbix_db_name }}
+  environment:
+    PGPASSWORD: "{{ rds_master_password }}"
+  when: schema_check.rc != 0 or 'rows' not in schema_check.stdout
+  changed_when: true
+
+- name: Grant table and sequence privileges to zabbix user
+  ansible.builtin.command:
+    cmd: >
+      psql -h {{ rds_address }} -U {{ rds_master_username }}
+      -d {{ zabbix_db_name }}
+      -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {{ zabbix_db_user }};
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ zabbix_db_user }};"
+  environment:
+    PGPASSWORD: "{{ rds_master_password }}"
+  changed_when: false
+
+- name: Set SELinux booleans for Zabbix
+  ansible.posix.seboolean:
+    name: "{{ item }}"
+    state: true
+    persistent: true
+  loop:
+    - httpd_can_network_connect_db
+    - httpd_can_network_connect
+    - zabbix_can_network
+
+- name: Enable and start firewalld
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: Enable and start Zabbix server
+  ansible.builtin.service:
+    name: zabbix-server
+    state: started
+    enabled: true
+
+- name: Enable and start nginx
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+
+- name: Enable and start php-fpm
+  ansible.builtin.service:
+    name: php-fpm
+    state: started
+    enabled: true
+
+- name: Open firewall ports for Zabbix
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    state: enabled
+    immediate: true
+  loop:
+    - 80/tcp
+    - 443/tcp
+    - 10051/tcp

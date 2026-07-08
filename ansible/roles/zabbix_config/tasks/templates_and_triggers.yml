@@ -1,0 +1,60 @@
+---
+# Link the stock "Linux by Zabbix agent" template (items + triggers included)
+# to the Zabbix server host. Per-ticket demo VMs get the same template linked
+# at registration time by vm_request_fulfillment.yml.
+
+- name: Get Zabbix server host ID and linked templates
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "host.get"
+      params:
+        filter:
+          host:
+            - "{{ zabbix_server_host_name }}"
+        selectParentTemplates:
+          - templateid
+          - name
+      auth: "{{ zbx_token }}"
+      id: 1
+  register: zbx_server_templates_get
+
+- name: Get Linux template ID
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "template.get"
+      params:
+        filter:
+          host:
+            - "{{ zabbix_linux_template }}"
+      auth: "{{ zbx_token }}"
+      id: 1
+  register: zbx_linux_template_get
+
+- name: Link Linux template to Zabbix server host
+  ansible.builtin.uri:
+    url: "{{ zabbix_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "template.massadd"
+      params:
+        templates:
+          - templateid: "{{ zbx_linux_template_get.json.result[0].templateid }}"
+        hosts:
+          - hostid: "{{ zbx_server_templates_get.json.result[0].hostid }}"
+      auth: "{{ zbx_token }}"
+      id: 1
+  when:
+    - zbx_server_templates_get.json.result | length > 0
+    - zbx_linux_template_get.json.result | length > 0
+    - zbx_server_templates_get.json.result[0].parentTemplates
+      | selectattr('name', 'equalto', zabbix_linux_template) | list | length == 0

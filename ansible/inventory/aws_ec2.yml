@@ -1,0 +1,16 @@
+---
+plugin: amazon.aws.aws_ec2
+# Region is read from AWS_REGION environment variable via boto3
+filters:
+  "tag:Project":
+    - aap-jira-demo
+  instance-state-name:
+    - running
+keyed_groups:
+  - key: ec2_tags.Role
+    prefix: tag_Role
+    separator: "_"
+compose:
+  ansible_host: public_ip_address
+hostnames:
+  - tag:Name

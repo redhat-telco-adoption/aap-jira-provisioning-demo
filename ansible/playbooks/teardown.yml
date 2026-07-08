@@ -1,0 +1,286 @@
+---
+# Teardown all demo resources from AAP, then terminate the per-ticket demo VMs
+# created by vm_request_fulfillment.yml (Terraform doesn't know about them —
+# they MUST be terminated before `make infra-destroy`, or the VPC/subnet/SG
+# destroy will fail with dependency errors).
+#
+# Run from ansible/:  ansible-playbook playbooks/teardown.yml
+# Then:               make infra-destroy
+
+- name: Teardown all demo resources from AAP and AWS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    aap_gateway_url: "{{ lookup('env', 'AAP_GATEWAY_URL') }}"
+    aap_admin_username: "{{ lookup('env', 'AAP_ADMIN_USERNAME') | default('admin', true) }}"
+    aap_admin_password: "{{ lookup('env', 'AAP_ADMIN_PASSWORD') }}"
+    aap_validate_certs: true
+    aap_organization: Default
+
+  tasks:
+
+    # ===========================================================
+    # EDA teardown (activation first, then stream, project, creds)
+    # ===========================================================
+
+    - name: Look up EDA activation
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/activations/?name={{ 'JIRA Event Handler' | urlencode }}"
+        method: GET
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+      register: activation_lookup
+      failed_when: false
+
+    - name: Delete EDA rulebook activation
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/activations/{{ activation_lookup.json.results[0].id }}/"
+        method: DELETE
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [204, 404]
+      when: activation_lookup.json.count | default(0) > 0
+      failed_when: false
+
+    - name: Look up EDA event streams to delete
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/event-streams/?page_size=100"
+        method: GET
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+      register: eda_streams
+      failed_when: false
+
+    - name: Delete demo EDA event streams
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/event-streams/{{ item.id }}/"
+        method: DELETE
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [204, 404]
+      loop: "{{ eda_streams.json.results | default([]) | selectattr('name', 'search', 'JIRA Webhook Stream') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      failed_when: false
+
+    - name: Look up EDA projects to delete
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/projects/?page_size=100"
+        method: GET
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+      register: eda_projects
+      failed_when: false
+
+    - name: Delete demo EDA projects
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/projects/{{ item.id }}/"
+        method: DELETE
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [204, 404]
+      loop: "{{ eda_projects.json.results | default([]) | selectattr('name', 'search', 'AAP JIRA Demo Rulebooks') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      failed_when: false
+
+    - name: Look up EDA credentials to delete
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/eda-credentials/?page_size=100"
+        method: GET
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+      register: eda_creds
+      failed_when: false
+
+    - name: Delete demo EDA credentials
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/eda/v1/eda-credentials/{{ item.id }}/"
+        method: DELETE
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [204, 404]
+      loop: >-
+        {{ eda_creds.json.results | default([]) | selectattr('name', 'in',
+           ['AAP Controller Credential', 'JIRA Stream Auth']) | list }}
+      loop_control:
+        label: "{{ item.name }}"
+      failed_when: false
+
+    # ===========================================================
+    # Controller teardown (job template → inventory → project → creds)
+    # ===========================================================
+
+    - name: Remove job template - VM Request Fulfillment
+      ansible.controller.job_template:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "VM Request Fulfillment"
+        organization: "{{ aap_organization }}"
+        state: absent
+      failed_when: false
+
+    - name: Remove demo inventory
+      ansible.controller.inventory:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "Demo Inventory"
+        organization: "{{ aap_organization }}"
+        state: absent
+      failed_when: false
+
+    - name: Remove demo project
+      ansible.controller.project:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "AAP JIRA Demo"
+        organization: "{{ aap_organization }}"
+        state: absent
+      failed_when: false
+
+    - name: Remove AWS credential
+      ansible.controller.credential:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "Demo AWS"
+        organization: "{{ aap_organization }}"
+        credential_type: Amazon Web Services
+        state: absent
+      failed_when: false
+
+    - name: Remove machine credential
+      ansible.controller.credential:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "Demo VM SSH Key"
+        organization: "{{ aap_organization }}"
+        credential_type: Machine
+        state: absent
+      failed_when: false
+
+    - name: Remove JIRA API credential
+      ansible.controller.credential:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "JIRA API Credentials"
+        organization: "{{ aap_organization }}"
+        credential_type: "JIRA API"
+        state: absent
+      failed_when: false
+
+    - name: Remove Zabbix API credential
+      ansible.controller.credential:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "Zabbix API Credentials"
+        organization: "{{ aap_organization }}"
+        credential_type: "Zabbix API"
+        state: absent
+      failed_when: false
+
+    - name: Remove JIRA API credential type
+      ansible.controller.credential_type:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "JIRA API"
+        state: absent
+      failed_when: false
+
+    - name: Remove Zabbix API credential type
+      ansible.controller.credential_type:
+        controller_host: "{{ aap_gateway_url }}"
+        controller_username: "{{ aap_admin_username }}"
+        controller_password: "{{ aap_admin_password }}"
+        validate_certs: "{{ aap_validate_certs }}"
+        name: "Zabbix API"
+        state: absent
+      failed_when: false
+
+    - name: Look up accumulated EDA Controller API tokens
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/controller/v2/tokens/?page_size=200"
+        method: GET
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+      register: controller_tokens
+      failed_when: false
+
+    - name: Delete all EDA Controller tokens
+      ansible.builtin.uri:
+        url: "{{ aap_gateway_url }}/api/controller/v2/tokens/{{ item.id }}/"
+        method: DELETE
+        user: "{{ aap_admin_username }}"
+        password: "{{ aap_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ aap_validate_certs }}"
+        status_code: [204, 404]
+      loop: "{{ controller_tokens.json.results | default([]) | selectattr('description', 'equalto', 'EDA Controller Token') | list }}"
+      loop_control:
+        label: "token {{ item.id }}"
+      failed_when: false
+
+    # ===========================================================
+    # AWS teardown — terminate per-ticket demo VMs
+    # (created by the job template, unknown to Terraform; must go
+    #  before `make infra-destroy` so the VPC can be deleted)
+    # ===========================================================
+
+    - name: Find demo VMs created from JIRA tickets
+      amazon.aws.ec2_instance_info:
+        filters:
+          "tag:Demo": aap-jira-demo
+          instance-state-name:
+            - running
+            - pending
+            - stopping
+            - stopped
+      register: demo_vms
+      failed_when: false
+
+    - name: Terminate demo VMs
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ demo_vms.instances | map(attribute='instance_id') | list }}"
+        state: terminated
+        wait: true
+      when: demo_vms.instances | default([]) | length > 0
+      failed_when: false
+
+    - name: Print next step
+      ansible.builtin.debug:
+        msg: "AAP resources and demo VMs removed. Now run: make infra-destroy"

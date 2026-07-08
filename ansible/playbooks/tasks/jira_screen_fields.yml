@@ -1,0 +1,23 @@
+---
+# Ensure the demo custom fields are present on one screen's first tab.
+# Expects: screen = {id, name}; created_field_ids populated.
+
+- name: "Get tabs for screen {{ screen.name }}"
+  ansible.builtin.uri:
+    url: "{{ api }}/screens/{{ screen.id }}/tabs"
+  register: screen_tabs
+
+- name: "Get fields on first tab of {{ screen.name }}"
+  ansible.builtin.uri:
+    url: "{{ api }}/screens/{{ screen.id }}/tabs/{{ screen_tabs.json[0].id }}/fields"
+  register: tab_fields
+
+- name: "Add missing fields to {{ screen.name }}"
+  ansible.builtin.uri:
+    url: "{{ api }}/screens/{{ screen.id }}/tabs/{{ screen_tabs.json[0].id }}/fields"
+    method: POST
+    body_format: json
+    status_code: 200
+    body:
+      fieldId: "{{ item }}"
+  loop: "{{ created_field_ids.values() | difference(tab_fields.json | map(attribute='id') | list) }}"

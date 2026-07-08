@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars and fill in values — or drive everything from .env
+# via `make infra` (which passes TF_VAR_* from the environment).
+# AWS credentials and region come from environment variables — do NOT add them here
+
+# --- Required: AMI (RHEL 9, us-east-2, owner 309956199498) ---
+zabbix_ami = "ami-08d2f096f70b3dd74" # RHEL-9.7.0_HVM
+
+# --- Required: RDS password ---
+rds_master_password = "RdsP@ssw0rd2024!"
+
+# --- Optional: SSH key pair name ---
+# key_pair_name = "demo-key"
+
+# --- Optional: instance type / disk ---
+# zabbix_instance_type = "t3.medium"
+# zabbix_disk_size     = 20
+
+# --- Optional: RDS ---
+# rds_instance_class    = "db.m5.large"
+# rds_engine_version    = "15"
+# rds_allocated_storage = 50
+# rds_master_username   = "postgres"

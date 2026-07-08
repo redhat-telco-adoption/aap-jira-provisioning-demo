@@ -1,0 +1,158 @@
+---
+# Bootstrap JIRA Cloud for the VM Request demo (FR-1.5 — JIRA config as code).
+# Creates: company-managed project, "VM Request" issue type, select custom
+# fields (Instance Size, Environment) with options, screen assignments.
+# Writes the created custom field IDs back into .env.
+#
+# NOT covered here: the Automation webhook rule — it needs the EDA event
+# stream URL, which exists only after AAP is configured (see docs/JIRA_SETUP
+# in the PRD). Run with:
+#   set -a; source .env; set +a; ansible-playbook ansible/playbooks/jira_bootstrap.yml
+
+- name: Bootstrap JIRA Cloud for the VM Request demo
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    jira_url: "{{ lookup('env', 'JIRA_URL') }}"
+    jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
+    jira_token: "{{ lookup('env', 'JIRA_API_TOKEN') }}"
+    project_key: "{{ lookup('env', 'JIRA_PROJECT_KEY') | default('VMREQ', true) }}"
+    project_name: "VM Requests"
+    issue_type_name: "VM Request"
+    env_file: "{{ playbook_dir }}/../../.env"
+    api: "{{ jira_url }}/rest/api/3"
+    select_fields:
+      - name: "Instance Size"
+        description: "EC2 instance type for the requested VM"
+        env_key: "JIRA_FIELD_INSTANCE_SIZE"
+        options: ["t3.micro", "t3.small", "t3.medium"]
+      - name: "Environment"
+        description: "Target environment for the requested VM"
+        env_key: "JIRA_FIELD_ENVIRONMENT"
+        options: ["dev", "test"]
+
+  module_defaults:
+    ansible.builtin.uri:
+      user: "{{ jira_email }}"
+      password: "{{ jira_token }}"
+      force_basic_auth: true
+      return_content: true
+      # body_format is set per-task on POST/PUT only: sending it on GET makes
+      # uri add a JSON content-type to body-less requests, which Atlassian's
+      # CDN rejects with a CloudFront 403
+      headers:
+        Accept: "application/json"
+
+  tasks:
+    - name: Verify credentials and get account ID
+      ansible.builtin.uri:
+        url: "{{ api }}/myself"
+      register: myself
+
+    - name: Check whether project exists
+      ansible.builtin.uri:
+        url: "{{ api }}/project/{{ project_key }}"
+        status_code: [200, 404]
+      register: project_get
+
+    - name: Create company-managed Kanban project
+      ansible.builtin.uri:
+        url: "{{ api }}/project"
+        method: POST
+        body_format: json
+        status_code: 201
+        body:
+          key: "{{ project_key }}"
+          name: "{{ project_name }}"
+          projectTypeKey: "software"
+          projectTemplateKey: "com.pyxis.greenhopper.jira:gh-simplified-kanban-classic"
+          leadAccountId: "{{ myself.json.accountId }}"
+          assigneeType: "UNASSIGNED"
+      register: project_create
+      when: project_get.status == 404
+
+    - name: Set project ID
+      ansible.builtin.set_fact:
+        project_id: "{{ (project_get.status == 200) | ternary(project_get.json.id, project_create.json.id | default('')) }}"
+
+    - name: List issue types
+      ansible.builtin.uri:
+        url: "{{ api }}/issuetype"
+      register: issue_types
+
+    - name: Create VM Request issue type
+      ansible.builtin.uri:
+        url: "{{ api }}/issuetype"
+        method: POST
+        body_format: json
+        status_code: 201
+        body:
+          name: "{{ issue_type_name }}"
+          description: "Request a new EC2 VM, fulfilled by AAP"
+          type: "standard"
+      register: issue_type_create
+      when: issue_types.json | selectattr('name', 'equalto', issue_type_name) | list | length == 0
+
+    - name: Set issue type ID
+      ansible.builtin.set_fact:
+        vm_issue_type_id: >-
+          {{ (issue_types.json | selectattr('name', 'equalto', issue_type_name) | map(attribute='id') | first)
+             | default(issue_type_create.json.id | default('')) }}
+
+    - name: Get project issue type scheme
+      ansible.builtin.uri:
+        url: "{{ api }}/issuetypescheme/project?projectId={{ project_id }}"
+      register: its_scheme
+
+    - name: Get issue types currently in the scheme
+      ansible.builtin.uri:
+        url: "{{ api }}/issuetypescheme/mapping?issueTypeSchemeId={{ its_scheme.json['values'][0].issueTypeScheme.id }}"
+      register: its_mapping
+
+    - name: Add VM Request to the project issue type scheme
+      ansible.builtin.uri:
+        url: "{{ api }}/issuetypescheme/{{ its_scheme.json['values'][0].issueTypeScheme.id }}/issuetype"
+        method: PUT
+        body_format: json
+        status_code: 204
+        body:
+          issueTypeIds: ["{{ vm_issue_type_id }}"]
+      when: its_mapping.json['values'] | selectattr('issueTypeId', 'equalto', vm_issue_type_id) | list | length == 0
+
+    - name: Configure select custom fields
+      ansible.builtin.include_tasks: tasks/jira_select_field.yml
+      loop: "{{ select_fields }}"
+      loop_control:
+        loop_var: field_spec
+        label: "{{ field_spec.name }}"
+
+    - name: Find project screens
+      ansible.builtin.uri:
+        url: "{{ api }}/screens?queryString={{ project_key }}"
+      register: screens
+
+    - name: Add custom fields to each project screen
+      ansible.builtin.include_tasks: tasks/jira_screen_fields.yml
+      loop: "{{ screens.json['values'] }}"
+      loop_control:
+        loop_var: screen
+        label: "{{ screen.name }}"
+
+    - name: Persist field IDs in .env
+      ansible.builtin.lineinfile:
+        path: "{{ env_file }}"
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop: "{{ created_field_ids | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "Project: {{ jira_url }}/browse/{{ project_key }} (id {{ project_id }})"
+          - "Issue type '{{ issue_type_name }}': id {{ vm_issue_type_id }}"
+          - "Field IDs written to .env: {{ created_field_ids }}"
+          - "PENDING (needs AAP/EDA URL): Automation webhook rule"
