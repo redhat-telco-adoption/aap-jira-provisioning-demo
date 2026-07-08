@@ -1,0 +1,97 @@
+---
+# Terminate all ticket-provisioned demo VMs to stop their cost, deregister
+# them from Zabbix, and note the cleanup on the originating JIRA tickets.
+# Scoped strictly to instances tagged Demo=aap-jira-demo AND Role=demo_vm —
+# the Terraform-managed Zabbix server is never touched.
+#
+# Runs in AAP as the "Demo VM Cleanup" job template (credentials inject the
+# AWS keys and the JIRA/Zabbix endpoints as environment variables), or
+# locally with the same variables sourced from .env.
+
+- name: Clean up ticket-provisioned demo VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    vm_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-2', true) }}"
+    jira_url: "{{ lookup('env', 'JIRA_URL') }}"
+    jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
+    jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') }}"
+    zabbix_url: "{{ lookup('env', 'ZABBIX_URL') }}"
+    zabbix_admin_password: "{{ lookup('env', 'ZABBIX_ADMIN_PASSWORD') }}"
+
+  tasks:
+    - name: Find ticket-provisioned demo VMs
+      amazon.aws.ec2_instance_info:
+        region: "{{ vm_region }}"
+        filters:
+          "tag:Demo": aap-jira-demo
+          "tag:Role": demo_vm
+          instance-state-name:
+            - pending
+            - running
+            - stopping
+            - stopped
+      register: demo_vms
+
+    - name: Nothing to clean up
+      ansible.builtin.meta: end_play
+      when: demo_vms.instances | length == 0
+
+    - name: Summarize what will be removed
+      ansible.builtin.debug:
+        msg: >-
+          Terminating {{ demo_vms.instances | length }} VM(s):
+          {{ demo_vms.instances | map(attribute='tags.Name') | list | join(', ') }}
+
+    - name: Remove hosts from Zabbix
+      community.zabbix.zabbix_host:
+        host_name: "{{ item.tags.Name }}"
+        state: absent
+      loop: "{{ demo_vms.instances }}"
+      loop_control:
+        label: "{{ item.tags.Name }}"
+      vars:
+        ansible_connection: httpapi
+        ansible_network_os: community.zabbix.zabbix
+        ansible_host: "{{ zabbix_url | regex_replace('^https?://', '') }}"
+        ansible_httpapi_port: "{{ (zabbix_url is match('^https')) | ternary(443, 80) }}"
+        ansible_httpapi_use_ssl: "{{ zabbix_url is match('^https') }}"
+        ansible_httpapi_validate_certs: false
+        # nginx serves Zabbix at the web root, not the /zabbix default
+        ansible_zabbix_url_path: ""
+        ansible_user: Admin
+        ansible_httpapi_pass: "{{ zabbix_admin_password }}"
+
+    - name: Terminate the instances
+      amazon.aws.ec2_instance:
+        region: "{{ vm_region }}"
+        instance_ids: "{{ demo_vms.instances | map(attribute='instance_id') | list }}"
+        state: absent
+        wait: true
+
+    - name: Comment on the originating JIRA tickets
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/3/issue/{{ item.tags.JiraIssue }}/comment"
+        method: POST
+        user: "{{ jira_email }}"
+        password: "{{ jira_api_token }}"
+        force_basic_auth: true
+        body_format: json
+        status_code: 201
+        body:
+          body:
+            type: doc
+            version: 1
+            content:
+              - type: paragraph
+                content:
+                  - type: text
+                    text: >-
+                      VM {{ item.tags.Name }} ({{ item.instance_id }})
+                      terminated and removed from Zabbix (cost cleanup).
+      loop: "{{ demo_vms.instances }}"
+      loop_control:
+        label: "{{ item.tags.JiraIssue }}"
+      when: item.tags.JiraIssue is defined

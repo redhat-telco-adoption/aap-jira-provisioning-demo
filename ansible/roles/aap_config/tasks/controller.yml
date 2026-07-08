@@ -190,3 +190,23 @@
       vm_key_name: "{{ tf_key_pair_name }}"
       zabbix_server_private_ip: "{{ tf_zabbix_private_ip }}"
     state: present
+
+- name: Create Demo VM Cleanup job template
+  ansible.controller.job_template:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "Demo VM Cleanup"
+    organization: "{{ aap_organization }}"
+    project: "{{ controller_project_name }}"
+    playbook: "ansible/playbooks/cleanup_demo_vms.yml"
+    inventory: "{{ controller_inventory_name }}"
+    credentials:
+      - "{{ aws_credential_name }}"
+      - "{{ jira_credential_name }}"
+      - "{{ zabbix_credential_name }}"
+    extra_vars:
+      vm_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-2', true) }}"
+    allow_simultaneous: false
+    state: present
