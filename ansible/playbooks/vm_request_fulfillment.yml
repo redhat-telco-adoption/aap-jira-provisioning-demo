@@ -140,6 +140,34 @@
     # zabbix_agent role points the agent at this address
     zabbix_private_ip: "{{ zabbix_server_private_ip }}"
 
+  pre_tasks:
+    # dnf on RHEL 9 OOM-kills on t3.micro (1 GiB); give it swap headroom
+    - name: Check whether swap is already active
+      ansible.builtin.command: swapon --show=NAME --noheadings
+      register: swap_status
+      changed_when: false
+
+    - name: Create and enable swap file for small instance types
+      when: "'/swapfile' not in swap_status.stdout"
+      block:
+        - name: Create swap file
+          ansible.builtin.command:
+            cmd: dd if=/dev/zero of=/swapfile bs=1M count=1024
+            creates: /swapfile
+
+        - name: Set swap file permissions
+          ansible.builtin.file:
+            path: /swapfile
+            mode: "0600"
+
+        - name: Format swap file
+          ansible.builtin.command:
+            cmd: mkswap /swapfile
+
+        - name: Enable swap
+          ansible.builtin.command:
+            cmd: swapon /swapfile
+
   roles:
     - role: zabbix_agent
 

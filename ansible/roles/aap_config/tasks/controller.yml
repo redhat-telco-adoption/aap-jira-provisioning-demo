@@ -72,8 +72,10 @@
     credential_type: "{{ jira_credential_type_name }}"
     inputs:
       jira_url: "{{ lookup('env', 'JIRA_URL') }}"
-      jira_email: "{{ lookup('env', 'JIRA_EMAIL') }}"
-      jira_api_token: "{{ lookup('env', 'JIRA_API_TOKEN') }}"
+      # Prefer the bot/service account so ticket updates show as "AAP
+      # Automation"; fall back to the admin account until the bot token exists.
+      jira_email: "{{ lookup('env', 'JIRA_BOT_EMAIL') | default(lookup('env', 'JIRA_EMAIL'), true) }}"
+      jira_api_token: "{{ lookup('env', 'JIRA_BOT_API_TOKEN') | default(lookup('env', 'JIRA_API_TOKEN'), true) }}"
     state: present
 
 - name: Create Zabbix API credential type
