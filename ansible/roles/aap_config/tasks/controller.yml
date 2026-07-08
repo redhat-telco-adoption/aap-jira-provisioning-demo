@@ -114,7 +114,7 @@
     organization: "{{ aap_organization }}"
     credential_type: "{{ zabbix_credential_type_name }}"
     inputs:
-      zabbix_url: "http://{{ tf_zabbix_public_ip }}"
+      zabbix_url: "{{ tf_zabbix_url }}"
       zabbix_admin_password: "{{ lookup('env', 'ZABBIX_ADMIN_PASSWORD') }}"
     state: present
 

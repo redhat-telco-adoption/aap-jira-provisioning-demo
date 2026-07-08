@@ -50,3 +50,8 @@ variable "project_name" {
 variable "environment" {
   default = "demo"
 }
+
+variable "base_domain" {
+  description = "Route53 hosted zone for stable DNS (e.g. sandboxNNNN.opentlc.com)"
+  type        = string
+}

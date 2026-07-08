@@ -21,6 +21,11 @@ tf_dir: "{{ playbook_dir }}/../../terraform"
 tf_zabbix_public_ip: >-
   {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw zabbix_public_ip 2>/dev/null',
             errors='ignore') | default('PENDING_INFRA', true) }}
+# Stable URL (EIP + Route53); falls back to the raw public IP if the
+# zabbix_url output doesn't exist yet.
+tf_zabbix_url: >-
+  {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw zabbix_url 2>/dev/null',
+            errors='ignore') | default('http://' + tf_zabbix_public_ip, true) }}
 tf_zabbix_private_ip: >-
   {{ lookup('pipe', 'cd ' + tf_dir + ' && terraform output -raw zabbix_private_ip 2>/dev/null',
             errors='ignore') | default('PENDING_INFRA', true) }}

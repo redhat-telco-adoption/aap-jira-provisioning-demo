@@ -9,7 +9,8 @@ TF_VARS = TF_VAR_zabbix_ami=$(ZABBIX_AMI) \
 	TF_VAR_key_pair_name=$(AWS_KEY_PAIR_NAME) \
 	TF_VAR_rds_master_password=$(RDS_MASTER_PASSWORD) \
 	TF_VAR_rds_master_username=$(RDS_MASTER_USERNAME) \
-	TF_VAR_rds_instance_class=$(RDS_INSTANCE_CLASS)
+	TF_VAR_rds_instance_class=$(RDS_INSTANCE_CLASS) \
+	TF_VAR_base_domain=$(BASE_DOMAIN)
 
 # ─── Full lifecycle ──────────────────────────────────────
 .PHONY: all

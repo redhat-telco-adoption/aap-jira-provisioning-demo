@@ -1,5 +1,5 @@
 output "zabbix_public_ip" {
-  value = aws_instance.zabbix_server.public_ip
+  value = aws_eip.zabbix.public_ip
 }
 
 output "zabbix_private_ip" {
@@ -35,11 +35,19 @@ output "key_pair_name" {
 
 output "summary" {
   value = <<-EOT
-    Zabbix Web:      http://${aws_instance.zabbix_server.public_ip}
+    Zabbix Web:      http://zabbix.${var.base_domain} (EIP ${aws_eip.zabbix.public_ip})
     Zabbix private:  ${aws_instance.zabbix_server.private_ip}
     RDS Endpoint:    ${aws_db_instance.shared_postgres.address}
     Demo VM subnet:  ${aws_subnet.public_a.id}
     Demo VM SG:      ${aws_security_group.demo_vm.id}
     Key pair:        ${aws_key_pair.demo.key_name} (${local_sensitive_file.private_key.filename})
   EOT
+}
+
+output "zabbix_fqdn" {
+  value = aws_route53_record.zabbix.name
+}
+
+output "zabbix_url" {
+  value = "http://${aws_route53_record.zabbix.name}"
 }
