@@ -21,6 +21,11 @@
     project_key: "{{ lookup('env', 'JIRA_PROJECT_KEY') | default('VMREQ', true) }}"
     project_name: "VM Requests"
     issue_type_name: "VM Request"
+    flow_name: "VM Request → AAP EDA"
+    eda_event_stream_url: "{{ lookup('env', 'EDA_EVENT_STREAM_URL') }}"
+    eda_auth_header: >-
+      Basic {{ (lookup('env', 'EDA_STREAM_USERNAME') + ':' +
+                lookup('env', 'EDA_STREAM_PASSWORD')) | b64encode }}
     env_file: "{{ playbook_dir }}/../../.env"
     api: "{{ jira_url }}/rest/api/3"
     select_fields:
@@ -139,6 +144,44 @@
       loop_control:
         loop_var: screen
         label: "{{ screen.name }}"
+
+    # --- Automation flow (webhook to EDA) -------------------------------
+    # Template captured from a UI-authored flow via
+    # GET /automation/public/jira/{cloudId}/rest/v1/rule/{uuid}; component
+    # schemas are undocumented, so the export is the source of truth.
+    # %TOKEN% substitution is used instead of Jinja because the flow body
+    # contains JIRA smart values ({{issue.key}}) that collide with Jinja.
+    - name: Get JIRA cloud ID
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/_edge/tenant_info"
+      register: tenant_info
+
+    - name: List existing automation flows
+      ansible.builtin.uri:
+        url: "https://api.atlassian.com/automation/public/jira/{{ tenant_info.json.cloudId }}/rest/v1/rule/summary"
+      register: flow_summary
+
+    - name: Create automation flow from template
+      ansible.builtin.uri:
+        url: "https://api.atlassian.com/automation/public/jira/{{ tenant_info.json.cloudId }}/rest/v1/rule"
+        method: POST
+        body_format: json
+        status_code: [200, 201]
+        body: >-
+          {{ lookup('ansible.builtin.file', 'files/jira_automation_flow.json')
+             | replace('%AUTHOR_ACCOUNT_ID%', myself.json.accountId)
+             | replace('%ACTOR_ACCOUNT_ID%',
+                       lookup('env', 'JIRA_FLOW_ACTOR_ID') | default(myself.json.accountId, true))
+             | replace('%CLOUD_ID%', tenant_info.json.cloudId)
+             | replace('%PROJECT_ID%', project_id | string)
+             | replace('%EDA_EVENT_STREAM_URL%', eda_event_stream_url)
+             | replace('%EDA_AUTH_HEADER%', eda_auth_header)
+             | replace('%FIELD_INSTANCE_SIZE%', created_field_ids.JIRA_FIELD_INSTANCE_SIZE)
+             | replace('%FIELD_ENVIRONMENT%', created_field_ids.JIRA_FIELD_ENVIRONMENT)
+             | from_json }}
+      when:
+        - eda_event_stream_url | length > 0
+        - flow_summary.json.data | selectattr('name', 'equalto', flow_name) | list | length == 0
 
     - name: Persist field IDs in .env
       ansible.builtin.lineinfile:

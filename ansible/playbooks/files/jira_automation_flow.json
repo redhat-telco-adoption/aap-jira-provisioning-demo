@@ -1,0 +1,66 @@
+{
+  "rule": {
+    "name": "VM Request → AAP EDA",
+    "state": "ENABLED",
+    "description": "",
+    "canOtherRuleTrigger": false,
+    "notifyOnError": "FIRSTERROR",
+    "authorAccountId": "%AUTHOR_ACCOUNT_ID%",
+    "actor": {
+      "type": "ACCOUNT_ID",
+      "actor": "%ACTOR_ACCOUNT_ID%"
+    },
+    "trigger": {
+      "component": "TRIGGER",
+      "schemaVersion": 1,
+      "type": "jira.issue.event.trigger:created",
+      "value": {
+        "eventKey": "jira:issue_created",
+        "issueEvent": "issue_created",
+        "eventFilters": [
+          "ari:cloud:jira:%CLOUD_ID%:project/%PROJECT_ID%"
+        ]
+      },
+      "connectionId": null,
+      "conditions": [],
+      "id": "3efa8b77-e47f-4c41-bdb3-ea23eb24a226"
+    },
+    "components": [
+      {
+        "component": "ACTION",
+        "schemaVersion": 1,
+        "type": "jira.issue.outgoing.webhook",
+        "value": {
+          "url": "%EDA_EVENT_STREAM_URL%",
+          "urlSecure": false,
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "%EDA_AUTH_HEADER%",
+              "headerSecure": true
+            }
+          ],
+          "sendIssue": false,
+          "contentType": "custom",
+          "customBody": "{\n    \"issue_type\": \"{{issue.issueType.name}}\",\n    \"issue_key\": \"{{issue.key}}\",\n    \"summary\": \"{{issue.summary}}\",\n    \"instance_size\": \"{{issue.fields.%FIELD_INSTANCE_SIZE%.value}}\",\n    \"environment\": \"{{issue.fields.%FIELD_ENVIRONMENT%.value}}\",\n    \"reporter\": \"{{issue.reporter.displayName}}\"\n  }",
+          "method": "POST",
+          "responseEnabled": false,
+          "continueOnErrorEnabled": false
+        },
+        "connectionId": null,
+        "conditions": [],
+        "parentId": null,
+        "conditionParentId": null,
+        "children": [],
+        "id": "5656814b-700b-4bd7-b58d-468c260e6934"
+      }
+    ],
+    "ruleScopeARIs": [
+      "ari:cloud:jira:%CLOUD_ID%:project/%PROJECT_ID%"
+    ],
+    "labels": [],
+    "writeAccessType": "OWNER_ONLY",
+    "collaborators": []
+  },
+  "connections": []
+}
