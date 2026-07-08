@@ -1,6 +1,9 @@
 ---
 plugin: amazon.aws.aws_ec2
-# Region is read from AWS_REGION environment variable via boto3
+# Pinned region: the Controller inventory sync runs in the EE where the AWS
+# credential injects keys but no region. Keep in step with AWS_REGION in .env.
+regions:
+  - us-east-2
 filters:
   "tag:Project":
     - aap-jira-demo

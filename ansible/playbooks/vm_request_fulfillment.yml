@@ -78,6 +78,8 @@
               RequestedBy: "{{ vm_requested_by }}"
               Role: demo_vm
               Demo: aap-jira-demo
+              # Matches the dynamic inventory filter (inventory/aws_ec2.yml)
+              Project: aap-jira-demo
             wait: true
           register: ec2_result
 

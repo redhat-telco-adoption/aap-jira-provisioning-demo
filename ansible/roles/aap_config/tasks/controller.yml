@@ -191,6 +191,37 @@
       zabbix_server_private_ip: "{{ tf_zabbix_private_ip }}"
     state: present
 
+# --- Dynamic AWS inventory ---
+# Hosts are discovered from EC2 by tag (Project=aap-jira-demo) via the
+# amazon.aws.aws_ec2 plugin config in the repo — nothing is hardcoded.
+- name: Create AWS dynamic inventory
+  ansible.controller.inventory:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "{{ aws_inventory_name }}"
+    description: "EC2 hosts discovered by tag via amazon.aws.aws_ec2"
+    organization: "{{ aap_organization }}"
+    state: present
+
+- name: Create AWS dynamic inventory source
+  ansible.controller.inventory_source:
+    controller_host: "{{ aap_gateway_url }}"
+    controller_username: "{{ aap_admin_username }}"
+    controller_password: "{{ aap_admin_password }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    name: "aws-ec2-by-tag"
+    inventory: "{{ aws_inventory_name }}"
+    source: scm
+    source_project: "{{ controller_project_name }}"
+    source_path: "ansible/inventory/aws_ec2.yml"
+    credential: "{{ aws_credential_name }}"
+    overwrite: true
+    overwrite_vars: true
+    update_on_launch: false
+    state: present
+
 - name: Create Demo VM Cleanup job template
   ansible.controller.job_template:
     controller_host: "{{ aap_gateway_url }}"

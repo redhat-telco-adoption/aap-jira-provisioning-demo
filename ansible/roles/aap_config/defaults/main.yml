@@ -47,6 +47,7 @@ vm_ami: "{{ lookup('env', 'VM_AMI') | default('PENDING_INFRA', true) }}"
 # --- Resource names ---
 controller_project_name: "AAP JIRA Demo"
 controller_inventory_name: "Demo Inventory"
+aws_inventory_name: "AWS Demo VMs"
 controller_jt_name: "VM Request Fulfillment"
 aws_credential_name: "Demo AWS"
 machine_credential_name: "Demo VM SSH Key"
